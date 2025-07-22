@@ -94,7 +94,6 @@ class WebTwitterDownloader(TwitterDownloader):
                             'filesize': f.get('filesize'),
                             'tbr': f.get('tbr'),  # Total bitrate
                             'vbr': f.get('vbr'),  # Video bitrate
-                            'abr': f.get('abr'),  # Audio bitrate
                         }
                         video_formats.append(quality_info)
                 
