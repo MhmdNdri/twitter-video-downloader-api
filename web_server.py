@@ -92,6 +92,7 @@ class WebTwitterDownloader(TwitterDownloader):
                             'height': f.get('height'),
                             'fps': f.get('fps'),
                             'filesize': f.get('filesize'),
+                            'filesize_approx': f.get('filesize_approx'),
                             'tbr': f.get('tbr'),  # Total bitrate
                             'vbr': f.get('vbr'),  # Video bitrate
                         }
@@ -365,3 +366,84 @@ if __name__ == '__main__':
     print("🛑 Press Ctrl+C to stop the server")
     
     app.run(debug=False, host='0.0.0.0', port=port)
+
+@app.route('/stream_download', methods=['POST'])
+def stream_download():
+    """Stream video download directly to browser without saving to disk"""
+    data = request.get_json()
+    url = data.get('url', '').strip()
+    format_id = data.get('format_id')
+    
+    if not url:
+        return jsonify({'success': False, 'error': 'URL is required'})
+    
+    downloader = WebTwitterDownloader()
+    
+    if not downloader.is_valid_twitter_url(url):
+        return jsonify({
+            'success': False, 
+            'error': 'Invalid Twitter URL format',
+            'message': 'Please provide a valid Twitter/X URL'
+        })
+    
+    try:
+        # Get video info first
+        info_result = downloader.get_video_info_web(url)
+        if not info_result['success']:
+            return jsonify(info_result)
+        
+        # Find the requested format
+        selected_format = None
+        if format_id:
+            for fmt in info_result['formats']:
+                if fmt['format_id'] == format_id:
+                    selected_format = fmt
+                    break
+        
+        if not selected_format:
+            selected_format = info_result['formats'][0]  # Use best quality
+        
+        # Generate filename
+        import re
+        clean_title = re.sub(r'[<>:"/\\|?*]', '_', (info_result['title'] or 'twitter_video'))[:100]
+        filename = f"{clean_title}_{selected_format['resolution']}.{selected_format['ext']}"
+        
+        # Stream the download using yt-dlp
+        import subprocess
+        import io
+        
+        cmd = [
+            'yt-dlp',
+            '--format', selected_format['format_id'],
+            '--output', '-',  # Output to stdout
+            url
+        ]
+        
+        def generate():
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            try:
+                while True:
+                    chunk = process.stdout.read(8192)
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                process.terminate()
+                process.wait()
+        
+        from flask import Response
+        return Response(
+            generate(),
+            mimetype='video/mp4',
+            headers={
+                'Content-Disposition': f'attachment; filename="{filename}"',
+                'Content-Type': 'video/mp4'
+            }
+        )
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': 'Download error', 
+            'message': str(e)
+        })
